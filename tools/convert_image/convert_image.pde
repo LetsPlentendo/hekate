@@ -27,7 +27,7 @@ void setup() {
 void draw() {
   if (img != null && ready == false) {
     ready = true;
-    background(220);
+    background(255);
     if (img.width > img.height) {
       translate(width / 2, height / 2);
       rotate(-HALF_PI);
@@ -41,6 +41,7 @@ void draw() {
   }
 
   if (ready == true) {
+    background(255);
     if (img.width > img.height) {
       translate(width / 2, height / 2);
       rotate(-HALF_PI);
@@ -51,7 +52,6 @@ void draw() {
     } else {
       image(img, 0, 0, width, height);
     }
-    fill(220);
     noStroke();
     float prog = (float) i / (width * height) * height;
     rect(0, prog, width, height - prog);
@@ -67,6 +67,13 @@ void fileSelected(File selection) {
   }
 }
 
+int shrink(int val) {
+  return val;
+  /*val += 1;
+  val *= 0.5;
+  return val - 1;*/
+}
+
 void createFile() {
     loadPixels();
     PrintWriter output = createWriter("image.txt");
@@ -76,7 +83,10 @@ void createFile() {
         output.print(tx);
         tx = "";
       }
-      tx = tx + unhex(hex(int(blue(pixels[i])), 2) + hex(int(green(pixels[i])), 2) + hex(int(red(pixels[i])), 2)) + "\n";
+      String red = hex(shrink(int(red(pixels[i]))), 2);
+      String green = hex(shrink(int(green(pixels[i]))), 2);
+      String blue = hex(shrink(int(blue(pixels[i]))), 2);
+      tx = tx + unhex(blue + green + red) + "\n";
     }
     output.println(tx);
     output.flush();

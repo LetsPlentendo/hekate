@@ -23,13 +23,10 @@
 #include "util.h"
 
 int draw_image(gfx_con_t *con, char *ini_path) {
-	char lbuf[512];
+	char lbuf[10];
 	FIL fp;
   int x = 0;
   int y = 0;
-  int width = 0;
-  unsigned int currColor;
-  char color[8];
 
 	if (f_open(&fp, ini_path, FA_READ) != FR_OK) {
     gfx_con_setpos(con, 0, 0);
@@ -37,26 +34,23 @@ int draw_image(gfx_con_t *con, char *ini_path) {
 		return 0;
   }
 
-  int line = 0;
+	f_gets(lbuf, 10, &fp);
+	int width = strtoul(lbuf, NULL, 10);
+	unsigned int currColor[width];
 	do {
-		//Fetch one line.
-		lbuf[0] = 0;
-		f_gets(lbuf, 512, &fp);
+		for (int i = 0; i < width; i++) {
+			f_gets(lbuf, 10, &fp);
+			currColor[i] = strtoul(lbuf, NULL, 10);
+		}
 
-    if (line != 0) {
-  		memcpy(color, lbuf, 8);
-      currColor = strtoul(color, NULL, 10);
-      gfx_set_pixel(con->gfx_ctxt, x, y, currColor);
-  		if (x == width) {
-  			x = 0;
-  			y++;
-  		}
-      x++;
-    } else {
-      width = strtoul(lbuf, NULL, 10);
-    }
-
-    line = -1;
+		for (int j = 0; j < width; j++) {
+			con->gfx_ctxt->fb[x + y * 768] = currColor[j];
+			x++;
+			if (x == width) {
+				x = 0;
+				y++;
+			}
+		}
 	} while (!f_eof(&fp));
 
 	f_close(&fp);
