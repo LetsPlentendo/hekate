@@ -15,9 +15,8 @@
 */
 
 #include <string.h>
-#include <stdlib.h>
-#include <alloca.h>
 
+#include "image.h"
 #include "clock.h"
 #include "uart.h"
 #include "i2c.h"
@@ -240,93 +239,18 @@ void config_hw()
 gfx_ctxt_t gfx_ctxt;
 gfx_con_t gfx_con;
 
-void print_fuseinfo()
-{
-	gfx_clear(&gfx_ctxt, 0xFF000000);
-	gfx_con_setpos(&gfx_con, 0, 0);
-
-	gfx_printf(&gfx_con, "%k(Unlocked) fuse cache:\n\n%k", 0xFFFF9955, 0xFFFFFFFF);
-	gfx_hexdump(&gfx_con, 0x7000F900, (u8 *)0x7000F900, 0x2FC);
-
-	sleep(100000);
-	btn_wait();
-}
-
-void print_kfuseinfo()
-{
-	gfx_clear(&gfx_ctxt, 0xFF000000);
-	gfx_con_setpos(&gfx_con, 0, 0);
-
-	gfx_printf(&gfx_con, "%kKFuse contents:\n\n%k", 0xFFFF9955, 0xFFFFFFFF);
-	u32 buf[KFUSE_NUM_WORDS];
-	if (!kfuse_read(buf))
-		gfx_printf(&gfx_con, "%kCRC fail.\n", 0xFF0000FF);
-	else
-		gfx_hexdump(&gfx_con, 0, (u8 *)buf, KFUSE_NUM_WORDS * 4);
-
-	sleep(100000);
-	btn_wait();
-}
-
-void print_tsec_key()
-{
-	gfx_clear(&gfx_ctxt, 0xFF000000);
-	gfx_con_setpos(&gfx_con, 0, 0);
-
-	sdmmc_storage_t storage;
-	sdmmc_t sdmmc;
-
-	sdmmc_storage_init_mmc(&storage, &sdmmc, SDMMC_4, SDMMC_BUS_WIDTH_8, 4);
-
-	//Read package1.
-	u8 *pkg1 = (u8 *)malloc(0x40000);
-	sdmmc_storage_set_mmc_partition(&storage, 1);
-	sdmmc_storage_read(&storage, 0x100000 / NX_EMMC_BLOCKSIZE, 0x40000 / NX_EMMC_BLOCKSIZE, pkg1);
-	const pkg1_id_t *pkg1_id = pkg1_identify(pkg1);
-	if (!pkg1_id)
-	{
-		gfx_printf(&gfx_con, "%kCould not identify package 1 version to read TSEC firmware (= '%s').%k\n", 0xFF0000FF, (char *)pkg1 + 0x10, 0xFFFFFFFF);
-		goto out;
-	}
-
-	for(u32 i = 1; i <= 3; i++)
-	{
-		u8 key[0x10];
-		int res = tsec_query(key, i, pkg1 + pkg1_id->tsec_off);
-
-		gfx_printf(&gfx_con, "%kTSEC key %d: %k", 0xFFFF9955, i, 0xFFFFFFFF);
-		if (res >= 0)
-		{
-			for (u32 i = 0; i < 0x10; i++)
-				gfx_printf(&gfx_con, "%02X", key[i]);
-		}
-		else
-			gfx_printf(&gfx_con, "%kERROR %X", 0xFF0000FF, res);
-		gfx_putc(&gfx_con, '\n');
-	}
-
-out:;
-	free(pkg1);
-	sdmmc_storage_end(&storage);
-	sleep(100000);
-	btn_wait();
-}
-
-void reboot_normal()
-{
+void reboot_normal() {
 	panic(0x21); //Bypass fuse programming in package1.
 }
 
-void reboot_rcm()
-{
+void reboot_rcm() {
 	PMC(APBDEV_PMC_SCRATCH0) = 2; //Reboot into rcm.
 	PMC(0) |= 0x10;
 	while (1)
 		sleep(1);
 }
 
-void power_off()
-{
+void power_off() {
 	//TODO: we should probably make sure all regulators are powered off properly.
 	i2c_send_byte(I2C_5, 0x3C, MAX77620_REG_ONOFFCNFG1, MAX77620_ONOFFCNFG1_PWR_OFF);
 }
@@ -352,302 +276,22 @@ int sd_mount()
 	return 0;
 }
 
-void *sd_file_read(char *path)
-{
-	FIL fp;
-	if (f_open(&fp, path, FA_READ) != FR_OK)
-		return NULL;
-
-	u32 size = f_size(&fp);
-	void *buf = malloc(size);
-
-	u8 *ptr = buf;
-	while (size > 0)
-	{
-		u32 rsize = MIN(size, 512);
-		if (f_read(&fp, ptr, rsize, NULL) != FR_OK)
-		{
-			free(buf);
-			return NULL;
-		}
-
-		ptr += rsize;
-		size -= rsize;
-	}
-
-	f_close(&fp);
-
-	return buf;
-}
-
-int dump_emmc_part(char *sd_path, sdmmc_storage_t *storage, emmc_part_t *part)
-{
-	static const u32 FAT32_FILESIZE_LIMIT = 0xFFFFFFFF;
-	static const u32 MULTIPART_SPLIT_SIZE = (1u << 31);
-
-	u32 totalSectors = part->lba_end - part->lba_start + 1;
-	char* outFilename = sd_path;
-	u32 sdPathLen = strlen(sd_path);
-	u32 numSplitParts = 0;
-	if ((sd_fs.fs_type != FS_EXFAT) && totalSectors > (FAT32_FILESIZE_LIMIT/NX_EMMC_BLOCKSIZE))
-	{
-		static const u32 MULTIPART_SPLIT_SECTORS = MULTIPART_SPLIT_SIZE/NX_EMMC_BLOCKSIZE;
-		numSplitParts = (totalSectors+MULTIPART_SPLIT_SECTORS-1)/MULTIPART_SPLIT_SECTORS;
-
-		outFilename = alloca(sdPathLen+4);
-		memcpy(outFilename, sd_path, sdPathLen);
-		outFilename[sdPathLen++] = '.';
-
-		outFilename[sdPathLen] = '0';
-		if (numSplitParts >= 10)
-		{
-			outFilename[sdPathLen+1] = '0';
-			outFilename[sdPathLen+2] = 0;
-		}
-		else
-			outFilename[sdPathLen+1] = 0;
-	}
-
-	FIL fp;
-	if (f_open(&fp, outFilename, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK)
-		return 0;
-
-	static const u32 NUM_SECTORS_PER_ITER = 512;
-	u8 *buf = (u8 *)malloc(NX_EMMC_BLOCKSIZE * NUM_SECTORS_PER_ITER);
-
-	u32 lba_curr = part->lba_start;
-	u32 bytesWritten = 0;
-	u32 currPartIdx = 0;
-	u32 prevPct=200;
-	while(totalSectors > 0)
-	{
-		if (numSplitParts != 0 && bytesWritten >= MULTIPART_SPLIT_SIZE)
-		{
-			f_close(&fp);
-			memset(&fp, 0, sizeof(fp));
-			currPartIdx++;
-
-			if (numSplitParts >= 10 && currPartIdx < 10)
-			{
-				outFilename[sdPathLen] = '0';
-				itoa(currPartIdx, &outFilename[sdPathLen+1], 10);
-			}
-			else
-				itoa(currPartIdx, &outFilename[sdPathLen], 10);
-
-			if (f_open(&fp, outFilename, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK)
-			{
-				free(buf);
-				return 0;
-			}
-			bytesWritten = 0;
-		}
-
-		int retryCount=0;
-		u32 num = MIN(totalSectors, NUM_SECTORS_PER_ITER);
-		while(!sdmmc_storage_read(storage, lba_curr, num, buf))
-		{
-			gfx_printf(&gfx_con, "%kError reading %d blocks @ LBA %08X (try %d) %k\n",
-				0xFF0000FF, num, lba_curr, ++retryCount, 0xFFFFFFFF);
-
-			sleep(500000);
-			if (retryCount >= 3)	
-				goto out;
-		}
-		f_write(&fp, buf, NX_EMMC_BLOCKSIZE * num, NULL);
-		u32 pct = (u64)((u64)(lba_curr - part->lba_start) * 100u) / (u64)(part->lba_end - part->lba_start);
-		if (pct != prevPct)
-		{
-			tui_pbar(&gfx_con, 0, gfx_con.y, pct);
-			prevPct = pct;
-		}	
-
-		lba_curr += num;
-		totalSectors -= num;
-		bytesWritten += num * NX_EMMC_BLOCKSIZE;
-
-		//force a flush after a lot of data if not splitting
-		if (numSplitParts == 0 && bytesWritten >= MULTIPART_SPLIT_SIZE) 
-		{
-			f_sync(&fp);
-			bytesWritten = 0;
-		}
-	}
-	tui_pbar(&gfx_con, 0, gfx_con.y, 100);
-
-out:;
-	free(buf);
-	f_close(&fp);
-	return 1;
-}
-
-typedef enum
-{
-	DUMP_BOOT = 1,
-	DUMP_SYSTEM = 2,
-	DUMP_USER = 4,
-	DUMP_RAW = 8
-} dumpType_t;
-
-static void dump_emmc_selected(dumpType_t dumpType)
-{
+void do_it() {
 	gfx_clear(&gfx_ctxt, 0xFF000000);
 	gfx_con_setpos(&gfx_con, 0, 0);
 
-	if (!sd_mount())
-	{
-		gfx_printf(&gfx_con, "%kFailed to mount SD card (make sure that it is inserted).%k\n", 0xFF0000FF, 0xFFFFFFFF);
-		goto out;
+	if (sd_mount()) {
+		draw_image(&gfx_con, "image.txt");
+		sleep(1000000);
+		btn_wait();
 	}
-
-	sdmmc_storage_t storage;
-	sdmmc_t sdmmc;
-	if(!sdmmc_storage_init_mmc(&storage, &sdmmc, SDMMC_4, SDMMC_BUS_WIDTH_8, 4))
-	{
-		gfx_printf(&gfx_con, "%kFailed to init eMMC.%k\n", 0xFF0000FF, 0xFFFFFFFF);
-		goto out;
+	else {
+		gfx_con_setcol(&gfx_con, 0xFF000000, 1, 0xFFFFFFFF);
+		gfx_printf(&gfx_con, "%kFailed to mount SD card (make sure that it is inserted).%k\n");
 	}
-
-	int i = 0;
-	if (dumpType & DUMP_BOOT)
-	{	
-		static const u32 BOOT_PART_SIZE = 0x400000;
-
-		emmc_part_t bootPart;
-		memset(&bootPart, 0, sizeof(bootPart));
-		bootPart.lba_start = 0;
-		bootPart.lba_end = (BOOT_PART_SIZE/NX_EMMC_BLOCKSIZE)-1;
-		for (i=0; i<2; i++)
-		{
-			memcpy(bootPart.name, "BOOT", 4);
-			bootPart.name[4] = (u8)('0' + i);
-			bootPart.name[5] = 0;
-
-			gfx_printf(&gfx_con, "%02d: %s (%08X-%08X)\n", i,
-				bootPart.name, bootPart.lba_start, bootPart.lba_end);
-
-			sdmmc_storage_set_mmc_partition(&storage, i+1);
-			dump_emmc_part(bootPart.name, &storage, &bootPart);
-			gfx_putc(&gfx_con, '\n');
-		}		
-	}
-
-	if ((dumpType & DUMP_SYSTEM) || (dumpType & DUMP_USER) || (dumpType & DUMP_RAW))
-	{
-		sdmmc_storage_set_mmc_partition(&storage, 0);
-
-		if ((dumpType & DUMP_SYSTEM) || (dumpType & DUMP_USER))
-		{
-			LIST_INIT(gpt);
-			nx_emmc_gpt_parse(&gpt, &storage);
-			LIST_FOREACH_ENTRY(emmc_part_t, part, &gpt, link)
-			{
-				if ((dumpType & DUMP_USER) == 0 && !strcmp(part->name, "USER"))
-					continue;
-				if ((dumpType & DUMP_SYSTEM) == 0 && strcmp(part->name, "USER"))
-					continue;
-
-				gfx_printf(&gfx_con, "%02d: %s (%08X-%08X)\n", i++,
-					part->name, part->lba_start, part->lba_end);
-
-				dump_emmc_part(part->name, &storage, part);
-				gfx_putc(&gfx_con, '\n');
-			}
-		}
-		
-		if (dumpType & DUMP_RAW)
-		{
-			static const u32 RAW_AREA_NUM_SECTORS = 0x3A3E000;
-
-			emmc_part_t rawPart;
-			memset(&rawPart, 0, sizeof(rawPart));
-			rawPart.lba_start = 0;
-			rawPart.lba_end = RAW_AREA_NUM_SECTORS-1;
-			strcpy(rawPart.name, "RawNand.bin");
-			{
-				gfx_printf(&gfx_con, "%02d: %s (%08X-%08X)\n", i++,
-					rawPart.name, rawPart.lba_start, rawPart.lba_end);
-
-				dump_emmc_part(rawPart.name, &storage, &rawPart);
-				gfx_putc(&gfx_con, '\n');
-			}		
-		}
-	}
-
-	sdmmc_storage_end(&storage);
-	gfx_puts(&gfx_con, "Done.\n");
-
-out:;
-	sleep(100000);
-	btn_wait();
 }
 
-void dump_emmc_system() { dump_emmc_selected(DUMP_SYSTEM); }
-void dump_emmc_user() { dump_emmc_selected(DUMP_USER); }
-void dump_emmc_boot() { dump_emmc_selected(DUMP_BOOT); }
-void dump_emmc_rawnand() { dump_emmc_selected(DUMP_RAW); }
-
-void launch_firmware()
-{
-	ini_sec_t *cfg_sec = NULL;
-	LIST_INIT(ini_sections);
-
-	gfx_clear(&gfx_ctxt, 0xFF000000);
-	gfx_con_setpos(&gfx_con, 0, 0);
-
-	if (sd_mount())
-	{
-		if (ini_parse(&ini_sections, "hekate_ipl.ini"))
-		{
-			//Build configuration menu.
-			ment_t *ments = (ment_t *)malloc(sizeof(ment_t) * 16);
-			ments[0].type = MENT_BACK;
-			ments[0].caption = "Back";
-			u32 i = 1;
-			LIST_FOREACH_ENTRY(ini_sec_t, ini_sec, &ini_sections, link)
-			{
-				if (!strcmp(ini_sec->name, "config"))
-					continue;
-				ments[i].type = MENT_CHOICE;
-				ments[i].caption = ini_sec->name;
-				ments[i].data = ini_sec;
-				i++;
-			}
-			if (i > 1)
-			{
-				memset(&ments[i], 0, sizeof(ment_t));
-				menu_t menu = {
-					ments, "Launch configurations", 0, 0
-				};
-				cfg_sec = (ini_sec_t *)tui_do_menu(&gfx_con, &menu);
-				if (!cfg_sec)
-					return;
-			}
-			else
-				gfx_printf(&gfx_con, "%kNo launch configurations found.%k\n", 0xFF0000FF, 0xFFFFFFFF);
-			free(ments);
-		}
-		else
-			gfx_printf(&gfx_con, "%kFailed to load 'hekate_ipl.ini'.%k\n", 0xFF0000FF, 0xFFFFFFFF);
-	}
-	else
-		gfx_printf(&gfx_con, "%kFailed to mount SD card (make sure that it is inserted).%k\n", 0xFF0000FF, 0xFFFFFFFF);
-
-	if (!cfg_sec)
-		gfx_printf(&gfx_con, "Using default launch configuration.\n");
-
-	if (!hos_launch(cfg_sec))
-		gfx_printf(&gfx_con, "%kFailed to launch firmware.%k\n", 0xFF0000FF, 0xFFFFFFFF);
-
-	//TODO: free ini.
-
-out:;
-	sleep(200000);
-	btn_wait();
-}
-
-void about()
-{
+void about() {
 	static const char octopus[] =
 	"hekate (c) 2018 naehrwert, st4rk\n\n"
 	"Thanks to: %kderrek, nedwill, plutoo, shuffle2, smea, thexyz, yellows8%k\n\n"
@@ -672,56 +316,34 @@ void about()
 	"     , _.-'.'\\ \\        / /    ( (     / /\n"
 	"      `--'`   ) )    .-'.'      '.'.  | (\n"
 	"             (/`    ( (`          ) )  '-;   %k[switchbrew]%k\n"
-	"              `      '-;         (-'%k";
+	"              `      '-;         (-'%k\n"
+	"------------------------------------------------------------------------\n"
+	"Thanks for all the people above for the hard work.\n"
+	"If you have any idea how to make the drawing process faster, feel free to\n"
+	"contact me.";
 
 	gfx_clear(&gfx_ctxt, 0xFF000000);
 	gfx_con_setpos(&gfx_con, 0, 0);
 
-	gfx_printf(&gfx_con, octopus, 0xFFFFCC00, 0xFFFFFFFF, 
+	gfx_printf(&gfx_con, octopus, 0xFFFFCC00, 0xFFFFFFFF,
 		0xFFFFCC00, 0xFFCCFF00, 0xFFFFCC00, 0xFFFFFFFF);
 
 	sleep(1000000);
 	btn_wait();
 }
 
-ment_t ment_cinfo[] = {
-	MDEF_BACK(),
-	MDEF_HANDLER("Print fuse info", print_fuseinfo),
-	MDEF_HANDLER("Print kfuse info", print_kfuseinfo),
-	MDEF_HANDLER("Print TSEC keys", print_tsec_key),
-	MDEF_END()
-};
-menu_t menu_cinfo = {
-	ment_cinfo,
-	"Console info", 0, 0
-};
-
-ment_t ment_tools[] = {
-	MDEF_BACK(),
-	MDEF_HANDLER("Dump eMMC RawNand", dump_emmc_rawnand),
-	MDEF_HANDLER("Dump eMMC SYS", dump_emmc_system),
-	MDEF_HANDLER("Dump eMMC USER", dump_emmc_user),
-	MDEF_HANDLER("Dump eMMC BOOT", dump_emmc_boot),
-	MDEF_END()
-};
-menu_t menu_tools = {
-	ment_tools,
-	"Tools", 0, 0
-};
-
 ment_t ment_top[] = {
-	MDEF_HANDLER("Launch firmware", launch_firmware),
-	MDEF_MENU("Tools", &menu_tools),
-	MDEF_MENU("Console info", &menu_cinfo),
-	MDEF_HANDLER("Reboot (normal)", reboot_normal),
-	MDEF_HANDLER("Reboot (rcm)", reboot_rcm),
+	MDEF_HANDLER("Draw my image!", do_it),
+	MDEF_HANDLER("Reboot into Horizon", reboot_normal),
+	MDEF_HANDLER("Reboot into RCM", reboot_rcm),
 	MDEF_HANDLER("Power off", power_off),
 	MDEF_HANDLER("About", about),
 	MDEF_END()
 };
+
 menu_t menu_top = {
 	ment_top,
-	"hekate - ipl", 0, 0
+	"hekate - repurposed as an (incredibly shitty) image viewer", 0, 0
 };
 
 extern void pivot_stack(u32 stack_top);
@@ -740,15 +362,19 @@ void ipl_main()
 	//uart_wait_idle(UART_C, UART_TX_IDLE);
 
 	display_init();
-	//display_color_screen(0xAABBCCDD);
+
+	/*int timer = 0xFF000000;
+	while (timer != 0xFFFFFFFF) {
+		display_color_screen(timer);
+		sleep(1000);
+		timer += 0x00010101;
+	}*/
+
 	u32 *fb = display_init_framebuffer();
 	gfx_init_ctxt(&gfx_ctxt, fb, 720, 1280, 768);
-	gfx_clear(&gfx_ctxt, 0xFF000000);
 	gfx_con_init(&gfx_con, &gfx_ctxt);
 
-	while (1)
+	while (1) {
 		tui_do_menu(&gfx_con, &menu_top);
-
-	while (1)
-		;
+	}
 }

@@ -1,16 +1,6 @@
-# hekate
+# hekate - repurposed as an (incredibly shitty) image viewer
+Title says it all :)
 
-![Image of Hekate](https://upload.wikimedia.org/wikipedia/commons/f/fc/H%C3%A9cate_-_Mallarm%C3%A9.png)
-
-Nintendo Switch bootloader, firmware patcher, and more.
-
-## ipl config
-
-The ipl can be configured via 'hekate_ipl.ini' (if it is present on the SD card). Each ini section represents a boot entry, except for the special section 'config' that controls the global configuration.
-
-Possible key/value combinations:
-
- - warmboot={SD path}
- - secmon={SD path}
- - kernel={SD path}
- - kip1={SD path}
+# How to use
+use the convert_image.pde tool (you'll need [Processing](https://www.processing.org)) to convert an image file to a text file. Place image.txt on the root of a FAT32-formatted SD card and insert it into your Switch. Compile the project, enter RCM mode and use fusée-launcher to launch the program.
+Enjoy!

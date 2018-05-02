@@ -40,6 +40,7 @@ OBJS = $(addprefix $(BUILD)/, \
 	tsec.o \
 	uart.o \
 	ini.o \
+	image.o \
 )
 OBJS += $(addprefix $(BUILD)/, diskio.o ff.o ffunicode.o)
 
@@ -66,4 +67,5 @@ $(BUILD)/%.o: $(SOURCEDIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD)/%.o: $(SOURCEDIR)/%.S
+	mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
