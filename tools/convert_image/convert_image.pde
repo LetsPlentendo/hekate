@@ -67,28 +67,31 @@ void fileSelected(File selection) {
   }
 }
 
-int shrink(int val) {
-  return val;
-  /*val += 1;
-  val *= 0.5;
-  return val - 1;*/
-}
-
 void createFile() {
     loadPixels();
     PrintWriter output = createWriter("image.txt");
-    String tx = width + "\n";
+    String tx = width + "";// + "\n" + height + "\n";
     for (i = 0; i < pixels.length; i++) {
       if (i % width == 0) {
-        output.print(tx);
+        output.println(tx);
         tx = "";
       }
-      String red = hex(shrink(int(red(pixels[i]))), 2);
-      String green = hex(shrink(int(green(pixels[i]))), 2);
-      String blue = hex(shrink(int(blue(pixels[i]))), 2);
-      tx = tx + unhex(blue + green + red) + "\n";
+      String red = pad(hex(int(red(pixels[i])), 2));
+      String green = pad(hex(int(green(pixels[i])), 2));
+      String blue = pad(hex(int(blue(pixels[i])), 2));
+      tx = tx + blue + green + red;
     }
     output.println(tx);
     output.flush();
     output.close();
+}
+
+String pad(String in) {
+  if (in.length() == 2) {
+    return in;
+  } else if (in.length() == 1) {
+    return "0" + in;
+  } else {
+    return "00";
+  }
 }

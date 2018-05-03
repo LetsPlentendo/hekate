@@ -36,5 +36,6 @@ typedef struct _ini_sec_t
 } ini_sec_t;
 
 int draw_image(gfx_con_t *con, char *ini_path);
+void substring(char s[], char d[], int pos, int len);
 
 #endif

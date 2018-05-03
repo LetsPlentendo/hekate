@@ -21,11 +21,13 @@
 #include "ff.h"
 #include "heap.h"
 #include "util.h"
+#include "btn.h"
 
 int draw_image(gfx_con_t *con, char *ini_path) {
-	char lbuf[10];
+	char lbuf[8];
+	char cbuf[8];
 	FIL fp;
-  int x = 0;
+	int x = 0;
   int y = 0;
 
 	if (f_open(&fp, ini_path, FA_READ) != FR_OK) {
@@ -33,25 +35,34 @@ int draw_image(gfx_con_t *con, char *ini_path) {
     gfx_printf(con, "File not found. Please make sure image.txt is located on the SD card.");
 		return 0;
   }
-
-	f_gets(lbuf, 10, &fp);
+	f_gets(lbuf, 8, &fp);
 	int width = strtoul(lbuf, NULL, 10);
-	unsigned int currColor[width];
-	do {
-		for (int i = 0; i < width; i++) {
-			f_gets(lbuf, 10, &fp);
-			currColor[i] = strtoul(lbuf, NULL, 10);
-		}
-
-		for (int j = 0; j < width; j++) {
-			con->gfx_ctxt->fb[x + y * 768] = currColor[j];
+	unsigned int currColor;
+	char slbuf[width * 6];
+	while (f_gets(slbuf, width * 6 + 2, &fp)) {
+		for (int i = 1; i < width * 6 + 2; i += 6) {
+			substring(slbuf, cbuf, i, 6);
+			currColor = 0x00000000 + strtoul(cbuf, NULL, 16);
+			con->gfx_ctxt->fb[x + y * 768] = currColor;
 			x++;
-			if (x == width) {
-				x = 0;
-				y++;
-			}
 		}
-	} while (!f_eof(&fp));
+		x = 0;
+		y++;
+		u32 btn = btn_read();
+		if (btn & BTN_POWER) {
+			break;
+		}
+	}
 
 	f_close(&fp);
+}
+
+void substring(char s[], char d[], int pos, int len) {
+   int c = 0;
+
+   while (c < len) {
+      d[c] = s[pos+c-1];
+      c++;
+   }
+   d[c] = '\0';
 }
