@@ -1,4 +1,4 @@
-# hekate - repurposed as an (incredibly shitty) image viewer
+# SwitchImageViewer - hekate repurposed as an (incredibly shitty) image viewer
 Title says it all :)
 
 # How to use

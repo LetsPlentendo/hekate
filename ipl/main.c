@@ -343,7 +343,7 @@ ment_t ment_top[] = {
 
 menu_t menu_top = {
 	ment_top,
-	"hekate - repurposed as an (incredibly shitty) image viewer", 0, 0
+	"SwitchImageViewer - hekate repurposed as an (incredibly shitty) image viewer", 0, 0
 };
 
 extern void pivot_stack(u32 stack_top);
